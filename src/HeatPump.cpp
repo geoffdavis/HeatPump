@@ -127,7 +127,7 @@ bool HeatPump::connect(HardwareSerial *serial, bool retry) {
 	  bitrate = (bitrate == 2400 ? 9600 : 2400);
 	  return connect(serial, false);
   }
-  return packetType == RCVD_PKT_CONNECT_SUCCESS;
+  return streamresult;
   //}
 }
 
