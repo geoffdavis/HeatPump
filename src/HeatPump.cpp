@@ -119,7 +119,7 @@ bool HeatPump::connect(HardwareSerial *serial) {
  */
 bool HeatPump::connect(HardwareSerial *serial, bool retry) {
   if(serial != NULL) {
-    _Stream = (Stream) serial;
+    _Stream = (Stream *) serial;
   }
   serial->begin(bitrate, SERIAL_8E1);
   bool streamresult = connect((Stream *) serial);
@@ -158,7 +158,7 @@ bool HeatPump::update() {
 
 void HeatPump::sync(byte packetType) {
   if((!connected) || (millis() - lastRecv > (PACKET_SENT_INTERVAL_MS * 10))) {
-    connect(NULL);
+    connect((Stream *) NULL);
   }
   else if(canRead()) {
     readPacket();
