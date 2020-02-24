@@ -27,7 +27,7 @@
 #include "WProgram.h"
 #endif
 
-/* 
+/*
  * Callback function definitions. Code differs for the ESP8266 platform, which requires the functional library.
  * Based on callback implementation in the Arduino Client for MQTT library (https://github.com/knolleary/pubsubclient)
  */
@@ -95,8 +95,8 @@ class HeatPump
 
     static const int INFOHEADER_LEN  = 5;
     const byte INFOHEADER[INFOHEADER_LEN]  = {0xfc, 0x42, 0x01, 0x30, 0x10};
-    
- 
+
+
     static const int INFOMODE_LEN = 6;
     const byte INFOMODE[INFOMODE_LEN] = {
       0x02, // request a settings packet - RQST_PKT_SETTINGS
@@ -145,8 +145,8 @@ class HeatPump
     heatpumpSettings wantedSettings;
 
     heatpumpStatus currentStatus;
-  
-    HardwareSerial * _HardSerial;
+
+    Stream * _Stream;
     unsigned long lastSend;
     bool waitForRead;
     int infoMode;
@@ -191,6 +191,7 @@ class HeatPump
     HeatPump();
     bool connect(HardwareSerial *serial);
     bool connect(HardwareSerial *serial, bool retry);
+    bool connect(Stream *stream);
     bool update();
     void sync(byte packetType = PACKET_TYPE_DEFAULT);
     void enableExternalUpdate();
@@ -201,7 +202,7 @@ class HeatPump
     heatpumpSettings getSettings();
     void setSettings(heatpumpSettings settings);
     void setPowerSetting(bool setting);
-    bool getPowerSettingBool(); 
+    bool getPowerSettingBool();
     const char* getPowerSetting();
     void setPowerSetting(const char* setting);
     const char* getModeSetting();
@@ -235,7 +236,7 @@ class HeatPump
     void setRoomTempChangedCallback(ROOM_TEMP_CHANGED_CALLBACK_SIGNATURE); // need to deprecate this, is available from setStatusChangedCallback
 
     // expert users only!
-    void sendCustomPacket(byte data[], int len); 
+    void sendCustomPacket(byte data[], int len);
 
 };
 #endif

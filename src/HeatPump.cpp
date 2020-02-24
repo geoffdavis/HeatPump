@@ -21,19 +21,19 @@
 // Structures //////////////////////////////////////////////////////////////////
 
 bool operator==(const heatpumpSettings& lhs, const heatpumpSettings& rhs) {
-  return lhs.power == rhs.power && 
-         lhs.mode == rhs.mode && 
-         lhs.temperature == rhs.temperature && 
+  return lhs.power == rhs.power &&
+         lhs.mode == rhs.mode &&
+         lhs.temperature == rhs.temperature &&
          lhs.fan == rhs.fan &&
          lhs.vane == rhs.vane &&
          lhs.wideVane == rhs.wideVane &&
-         lhs.iSee == rhs.iSee; 
+         lhs.iSee == rhs.iSee;
 }
 
 bool operator!=(const heatpumpSettings& lhs, const heatpumpSettings& rhs) {
-  return lhs.power != rhs.power || 
-         lhs.mode != rhs.mode || 
-         lhs.temperature != rhs.temperature || 
+  return lhs.power != rhs.power ||
+         lhs.mode != rhs.mode ||
+         lhs.temperature != rhs.temperature ||
          lhs.fan != rhs.fan ||
          lhs.vane != rhs.vane ||
          lhs.wideVane != rhs.wideVane ||
@@ -41,9 +41,9 @@ bool operator!=(const heatpumpSettings& lhs, const heatpumpSettings& rhs) {
 }
 
 bool operator!(const heatpumpSettings& settings) {
-  return !settings.power && 
-         !settings.mode && 
-         !settings.temperature && 
+  return !settings.power &&
+         !settings.mode &&
+         !settings.temperature &&
          !settings.fan &&
          !settings.vane &&
          !settings.wideVane &&
@@ -51,15 +51,15 @@ bool operator!(const heatpumpSettings& settings) {
 }
 
 bool operator==(const heatpumpTimers& lhs, const heatpumpTimers& rhs) {
-  return lhs.mode                == rhs.mode && 
+  return lhs.mode                == rhs.mode &&
          lhs.onMinutesSet        == rhs.onMinutesSet &&
          lhs.onMinutesRemaining  == rhs.onMinutesRemaining &&
          lhs.offMinutesSet       == rhs.offMinutesSet &&
-         lhs.offMinutesRemaining == rhs.offMinutesRemaining; 
+         lhs.offMinutesRemaining == rhs.offMinutesRemaining;
 }
 
 bool operator!=(const heatpumpTimers& lhs, const heatpumpTimers& rhs) {
-  return lhs.mode                != rhs.mode || 
+  return lhs.mode                != rhs.mode ||
          lhs.onMinutesSet        != rhs.onMinutesSet ||
          lhs.onMinutesRemaining  != rhs.onMinutesRemaining ||
          lhs.offMinutesSet       != rhs.offMinutesSet ||
@@ -84,20 +84,15 @@ HeatPump::HeatPump() {
 
 // Public Methods //////////////////////////////////////////////////////////////
 
-bool HeatPump::connect(HardwareSerial *serial) {
-	return connect(serial,true);
-}
-
-bool HeatPump::connect(HardwareSerial *serial, bool retry) {
-  if(serial != NULL) {
-    _HardSerial = serial;
-  }
+/*
+ * Communication setup on the raw stream object.
+ */
+bool HeatPump::connect(Stream *stream) {
   connected = false;
-  _HardSerial->begin(bitrate, SERIAL_8E1);
   if(onConnectCallback) {
     onConnectCallback();
   }
-  
+
   // settle before we start sending packets
   delay(2000);
 
@@ -108,7 +103,27 @@ bool HeatPump::connect(HardwareSerial *serial, bool retry) {
   writePacket(packet, CONNECT_LEN);
   while(!canRead()) { delay(10); }
   int packetType = readPacket();
-  if(packetType != RCVD_PKT_CONNECT_SUCCESS && retry){
+
+  return packetType == RCVD_PKT_CONNECT_SUCCESS;
+}
+
+/* Attempt to connect with a HardwareSerial handle at the default baud rate. */
+bool HeatPump::connect(HardwareSerial *serial) {
+	return connect(serial,true);
+}
+
+/* Attempt to connect with a HardwareSerial handle.
+ *
+ * Guesses baud rate and tries several if the first option doens't work.
+ * Note that all actual communication is handled in connect(Stream *stream).
+ */
+bool HeatPump::connect(HardwareSerial *serial, bool retry) {
+  if(serial != NULL) {
+    _Stream = (Stream) serial;
+  }
+  serial->begin(bitrate, SERIAL_8E1);
+  bool streamresult = connect((Stream *) serial);
+  if(!streamresult && retry){
 	  bitrate = (bitrate == 2400 ? 9600 : 2400);
 	  return connect(serial, false);
   }
@@ -241,7 +256,7 @@ void HeatPump::setRemoteTemperature(float setting) {
   byte packet[PACKET_LEN] = {};
   for (int i = 0; i < 21; i++) {
     packet[i] = 0x00;
-  } 
+  }
   for (int i = 0; i < HEADER_LEN; i++) {
     packet[i] = HEADER[i];
   }
@@ -259,7 +274,7 @@ void HeatPump::setRemoteTemperature(float setting) {
   else {
     packet[6] = 0x00;
     packet[8] = 0x80; //MHK1 send 80, even though it could be 00, since ControlByte is 00
-  } 
+  }
   // add the checksum
   byte chkSum = checkSum(packet, 21);
   packet[21] = chkSum;
@@ -324,7 +339,7 @@ bool HeatPump::getOperating() {
 }
 
 float HeatPump::FahrenheitToCelsius(int tempF) {
-  float temp = (tempF - 32) / 1.8;                
+  float temp = (tempF - 32) / 1.8;
   return ((float)round(temp*2))/2;                 //Round to nearest 0.5C
 }
 
@@ -364,7 +379,7 @@ void HeatPump::sendCustomPacket(byte data[], int packetLength) {
 
   // add data
   for (int i = 0; i < packetLength; i++) {
-    packet[(i+1)] = data[i]; 
+    packet[(i+1)] = data[i];
   }
 
   // add checksum
@@ -415,7 +430,7 @@ int HeatPump::lookupByteMapValue(const int valuesMap[], const byte byteMap[], in
 
 bool HeatPump::canSend(bool isInfo) {
   return (millis() - (isInfo ? PACKET_INFO_INTERVAL_MS : PACKET_SENT_INTERVAL_MS)) > lastSend;
-}  
+}
 
 bool HeatPump::canRead() {
   return (waitForRead && (millis() - PACKET_SENT_INTERVAL_MS) > lastSend);
@@ -476,7 +491,7 @@ void HeatPump::createInfoPacket(byte *packet, byte packetType) {
   for (int i = 0; i < INFOHEADER_LEN; i++) {
     packet[i] = INFOHEADER[i];
   }
-  
+
   // set the mode - settings or room temperature
   if(packetType != PACKET_TYPE_DEFAULT) {
     packet[5] = INFOMODE[packetType];
@@ -502,7 +517,7 @@ void HeatPump::createInfoPacket(byte *packet, byte packetType) {
 
 void HeatPump::writePacket(byte *packet, int length) {
   for (int i = 0; i < length; i++) {
-     _HardSerial->write((uint8_t)packet[i]);
+     _Stream->write((uint8_t)packet[i]);
   }
 
   if(packetCallback) {
@@ -519,13 +534,13 @@ int HeatPump::readPacket() {
   int dataSum = 0;
   byte checksum = 0;
   byte dataLength = 0;
-  
+
   waitForRead = false;
 
-  if(_HardSerial->available() > 0) {
+  if(_Stream->available() > 0) {
     // read until we get start byte 0xfc
-    while(_HardSerial->available() > 0 && !foundStart) {
-      header[0] = _HardSerial->read();
+    while(_Stream->available() > 0 && !foundStart) {
+      header[0] = _Stream->read();
       if(header[0] == HEADER[0]) {
         foundStart = true;
         delay(100); // found that this delay increases accuracy when reading, might not be needed though
@@ -535,23 +550,23 @@ int HeatPump::readPacket() {
     if(!foundStart) {
       return RCVD_PKT_FAIL;
     }
-    
+
     //read header
     for(int i=1;i<5;i++) {
-      header[i] =  _HardSerial->read();
+      header[i] =  _Stream->read();
     }
-    
+
     //check header
     if(header[0] == HEADER[0] && header[2] == HEADER[2] && header[3] == HEADER[3]) {
       dataLength = header[4];
-      
+
       for(int i=0;i<dataLength;i++) {
-        data[i] = _HardSerial->read();
+        data[i] = _Stream->read();
       }
-  
+
       // read checksum byte
-      data[dataLength] = _HardSerial->read();
-  
+      data[dataLength] = _Stream->read();
+
       // sum up the header bytes...
       for (int i = 0; i < INFOHEADER_LEN; i++) {
         dataSum += header[i];
@@ -561,7 +576,7 @@ int HeatPump::readPacket() {
       for (int i = 0; i < dataLength; i++) {
         dataSum += data[i];
       }
-  
+
       // calculate checksum
       checksum = (0xfc - dataSum) & 0xff;
 
@@ -599,7 +614,7 @@ int HeatPump::readPacket() {
               receivedSettings.vane        = lookupByteMapValue(VANE_MAP, VANE, 7, data[7]);
               receivedSettings.wideVane    = lookupByteMapValue(WIDEVANE_MAP, WIDEVANE, 7, data[10] & 0x0F);
 		    wideVaneAdj = (data[10] & 0xF0) == 0x80 ? true : false;
-              
+
               if(settingsChangedCallback && receivedSettings != currentSettings) {
                 currentSettings = receivedSettings;
                 settingsChangedCallback();
@@ -645,7 +660,7 @@ int HeatPump::readPacket() {
             }
 
             case 0x04: { // unknown
-                break; 
+                break;
             }
 
             case 0x05: { // timer packet
@@ -689,12 +704,12 @@ int HeatPump::readPacket() {
             case 0x09: { // standby mode maybe?
               break;
             }
-          } 
-        } 
-        
-        if(header[1] == 0x61) { //Last update was successful 
+          }
+        }
+
+        if(header[1] == 0x61) { //Last update was successful
           return RCVD_PKT_UPDATE_SUCCESS;
-        } else if(header[1] == 0x7a) { //Last update was successful 
+        } else if(header[1] == 0x7a) { //Last update was successful
           connected = true;
           return RCVD_PKT_CONNECT_SUCCESS;
         }
