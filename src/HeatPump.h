@@ -27,6 +27,9 @@
 #include "WProgram.h"
 #endif
 
+#include "esphome.h" // for logging
+static const char *HPTAG = "HeatPump"; // Logging tag
+
 /* 
  * Callback function definitions. Code differs for the ESP8266 platform, which requires the functional library.
  * Based on callback implementation in the Arduino Client for MQTT library (https://github.com/knolleary/pubsubclient)
@@ -59,6 +62,8 @@ struct heatpumpSettings {
   bool connected;
 };
 
+void init_heatpumpSettings(heatpumpSettings * hps);
+
 bool operator==(const heatpumpSettings& lhs, const heatpumpSettings& rhs);
 bool operator!=(const heatpumpSettings& lhs, const heatpumpSettings& rhs);
 
@@ -70,6 +75,8 @@ struct heatpumpTimers {
   int offMinutesRemaining;
 };
 
+void init_heatpumpTimers(heatpumpTimers * hpt);
+
 bool operator==(const heatpumpTimers& lhs, const heatpumpTimers& rhs);
 bool operator!=(const heatpumpTimers& lhs, const heatpumpTimers& rhs);
 
@@ -79,6 +86,8 @@ struct heatpumpStatus {
   heatpumpTimers timers;
   int compressorFrequency;
 };
+
+void init_heatpumpStatus(heatpumpStatus * hps);
 
 class HeatPump
 {
@@ -145,7 +154,7 @@ class HeatPump
     heatpumpSettings wantedSettings;
 
     heatpumpStatus currentStatus;
-  
+
     HardwareSerial * _HardSerial;
     unsigned long lastSend;
     bool waitForRead;

@@ -19,6 +19,31 @@
 #include "HeatPump.h"
 
 // Structures //////////////////////////////////////////////////////////////////
+void init_heatpumpSettings(heatpumpSettings * hps) {
+  hps->power              = NULL;
+  hps->mode               = NULL;
+  hps->temperature        = 0;
+  hps->fan                = NULL;
+  hps->vane               = NULL;
+  hps->wideVane           = NULL;
+  hps->iSee               = false;
+  hps->connected          = false;
+}
+
+void init_heatpumpTimers(heatpumpTimers * hpt) {
+  hpt->mode                 = NULL;
+  hpt->onMinutesSet         = 0;
+  hpt->onMinutesRemaining   = 0;
+  hpt->offMinutesSet        = 0;
+  hpt->offMinutesRemaining  = 0;
+}
+
+void init_heatpumpStatus(heatpumpStatus * hps) {
+  hps->roomTemperature     = 0;
+  hps->operating           = false;
+  hps->compressorFrequency = 0;
+  init_heatpumpTimers(&(hps->timers));
+}
 
 bool operator==(const heatpumpSettings& lhs, const heatpumpSettings& rhs) {
   return lhs.power == rhs.power && 
@@ -80,6 +105,14 @@ HeatPump::HeatPump() {
   externalUpdate = false;
   wideVaneAdj = false;
   currentStatus = {0, false, {TIMER_MODE_MAP[0], 0, 0, 0, 0}}; // initialise to all off, then it will update shortly after connect
+  onConnectCallback = NULL;
+  settingsChangedCallback = NULL;
+  statusChangedCallback = NULL;
+  roomTempChangedCallback = NULL;
+  packetCallback = NULL;
+  init_heatpumpSettings(&(this->currentSettings));
+  init_heatpumpSettings(&(this->wantedSettings));
+  init_heatpumpStatus(&(this->currentStatus));
 }
 
 // Public Methods //////////////////////////////////////////////////////////////
@@ -89,15 +122,19 @@ bool HeatPump::connect(HardwareSerial *serial) {
 }
 
 bool HeatPump::connect(HardwareSerial *serial, bool retry) {
+  esphome::ESP_LOGCONFIG(HPTAG, "Connecting - serial is %p", serial);
   if(serial != NULL) {
     _HardSerial = serial;
   }
   connected = false;
+  esphome::ESP_LOGCONFIG(HPTAG, "Calling serial begin with bitrate %i...", bitrate);
   _HardSerial->begin(bitrate, SERIAL_8E1);
-  if(onConnectCallback) {
+  if(onConnectCallback != NULL) {
+    esphome::ESP_LOGCONFIG(HPTAG, "Calling onConnect callback function %p.", onConnectCallback);
     onConnectCallback();
   }
   
+  esphome::ESP_LOGCONFIG(HPTAG, "Waiting for 2000 ms");
   // settle before we start sending packets
   delay(2000);
 
@@ -105,13 +142,18 @@ bool HeatPump::connect(HardwareSerial *serial, bool retry) {
   byte packet[CONNECT_LEN];
   memcpy(packet, CONNECT, CONNECT_LEN);
   //for(int count = 0; count < 2; count++) {
+  esphome::ESP_LOGCONFIG(HPTAG, "Calling writePacket");
   writePacket(packet, CONNECT_LEN);
+  esphome::ESP_LOGCONFIG(HPTAG, "Delaying until we can read");
   while(!canRead()) { delay(10); }
+  esphome::ESP_LOGCONFIG(HPTAG, "Reading packet");
   int packetType = readPacket();
   if(packetType != RCVD_PKT_CONNECT_SUCCESS && retry){
 	  bitrate = (bitrate == 2400 ? 9600 : 2400);
+    esphome::ESP_LOGCONFIG(HPTAG, "Trying an alternate bitrate of %i", bitrate);
 	  return connect(serial, false);
   }
+  esphome::ESP_LOGCONFIG(HPTAG, "Returning success? %s", YESNO(packetType == RCVD_PKT_CONNECT_SUCCESS));
   return packetType == RCVD_PKT_CONNECT_SUCCESS;
   //}
 }
@@ -142,19 +184,27 @@ bool HeatPump::update() {
 }
 
 void HeatPump::sync(byte packetType) {
+  esphome::ESP_LOGD(HPTAG, "in sync(%hhx)", packetType);
   if((!connected) || (millis() - lastRecv > (PACKET_SENT_INTERVAL_MS * 10))) {
+    esphome::ESP_LOGD(HPTAG, "sync - reconnecting");
     connect(NULL);
   }
   else if(canRead()) {
+    esphome::ESP_LOGD(HPTAG, "sync - canRead is True - reading packet");
     readPacket();
   }
   else if(autoUpdate && !firstRun && wantedSettings != currentSettings && packetType == PACKET_TYPE_DEFAULT) {
+    esphome::ESP_LOGD(HPTAG, "sync - calling update");
     update();
   }
   else if(canSend(true)) {
+    esphome::ESP_LOGD(HPTAG, "sync - sending data");
     byte packet[PACKET_LEN] = {};
     createInfoPacket(packet, packetType);
     writePacket(packet, PACKET_LEN);
+  }
+  else {
+    esphome::ESP_LOGD(HPTAG, "sync - can't do anything.");
   }
 }
 
@@ -501,18 +551,23 @@ void HeatPump::createInfoPacket(byte *packet, byte packetType) {
 }
 
 void HeatPump::writePacket(byte *packet, int length) {
+  esphome::ESP_LOGD(HPTAG, "in writePacket - calling write");
   for (int i = 0; i < length; i++) {
      _HardSerial->write((uint8_t)packet[i]);
   }
 
-  if(packetCallback) {
+  esphome::ESP_LOGD(HPTAG, "back from write.");
+  if(packetCallback != NULL) {
+    esphome::ESP_LOGD(HPTAG, "Calling packetCallback %p", packetCallback);
     packetCallback(packet, length, (char*)"packetSent");
+    esphome::ESP_LOGD(HPTAG, "back from callback");
   }
   waitForRead = true;
   lastSend = millis();
 }
 
 int HeatPump::readPacket() {
+  esphome::ESP_LOGD(HPTAG, "in readPacket");
   byte header[INFOHEADER_LEN] = {};
   byte data[PACKET_LEN] = {};
   bool foundStart = false;
@@ -524,6 +579,7 @@ int HeatPump::readPacket() {
 
   if(_HardSerial->available() > 0) {
     // read until we get start byte 0xfc
+    esphome::ESP_LOGD(HPTAG, "looking for start byte");
     while(_HardSerial->available() > 0 && !foundStart) {
       header[0] = _HardSerial->read();
       if(header[0] == HEADER[0]) {
@@ -567,7 +623,7 @@ int HeatPump::readPacket() {
 
       if(data[dataLength] == checksum) {
         lastRecv = millis();
-        if(packetCallback) {
+        if(packetCallback != NULL) {
           byte packet[37]; // we are going to put header[5] and data[32] into this, so the whole packet is sent to the callback
           for(int i=0; i<INFOHEADER_LEN; i++) {
             packet[i] = header[i];
@@ -581,7 +637,9 @@ int HeatPump::readPacket() {
         if(header[1] == 0x62) {
           switch(data[0]) {
             case 0x02: { // setting information
+              esphome::ESP_LOGD(HPTAG, "Received settings, started parsing...");
               heatpumpSettings receivedSettings;
+              init_heatpumpSettings(&receivedSettings);
               receivedSettings.power       = lookupByteMapValue(POWER_MAP, POWER, 2, data[3]);
               receivedSettings.iSee = data[4] > 0x08 ? true : false;
               receivedSettings.mode = lookupByteMapValue(MODE_MAP, MODE, 5, receivedSettings.iSee  ? (data[4] - 0x08) : data[4]);
@@ -598,9 +656,9 @@ int HeatPump::readPacket() {
               receivedSettings.fan         = lookupByteMapValue(FAN_MAP, FAN, 6, data[6]);
               receivedSettings.vane        = lookupByteMapValue(VANE_MAP, VANE, 7, data[7]);
               receivedSettings.wideVane    = lookupByteMapValue(WIDEVANE_MAP, WIDEVANE, 7, data[10] & 0x0F);
-		    wideVaneAdj = (data[10] & 0xF0) == 0x80 ? true : false;
+              wideVaneAdj = (data[10] & 0xF0) == 0x80 ? true : false;
               
-              if(settingsChangedCallback && receivedSettings != currentSettings) {
+              if(settingsChangedCallback != NULL && receivedSettings != currentSettings) {
                 currentSettings = receivedSettings;
                 settingsChangedCallback();
               } else {
@@ -627,14 +685,14 @@ int HeatPump::readPacket() {
                 receivedStatus.roomTemperature = lookupByteMapValue(ROOM_TEMP_MAP, ROOM_TEMP, 32, data[3]);
               }
 
-              if((statusChangedCallback || roomTempChangedCallback) && currentStatus.roomTemperature != receivedStatus.roomTemperature) {
+              if((statusChangedCallback != NULL || roomTempChangedCallback != NULL) && currentStatus.roomTemperature != receivedStatus.roomTemperature) {
                 currentStatus.roomTemperature = receivedStatus.roomTemperature;
 
-                if(statusChangedCallback) {
+                if(statusChangedCallback != NULL) {
                   statusChangedCallback(currentStatus);
                 }
 
-                if(roomTempChangedCallback) { // this should be deprecated - statusChangedCallback covers it
+                if(roomTempChangedCallback != NULL) { // this should be deprecated - statusChangedCallback covers it
                   roomTempChangedCallback(currentStatus.roomTemperature);
                 }
               } else {
@@ -650,6 +708,7 @@ int HeatPump::readPacket() {
 
             case 0x05: { // timer packet
               heatpumpTimers receivedTimers;
+              init_heatpumpTimers(&receivedTimers);
 
               receivedTimers.mode                = lookupByteMapValue(TIMER_MODE_MAP, TIMER_MODE, 4, data[3]);
               receivedTimers.onMinutesSet        = data[4] * TIMER_INCREMENT_MINUTES;
@@ -658,7 +717,7 @@ int HeatPump::readPacket() {
               receivedTimers.offMinutesRemaining = data[7] * TIMER_INCREMENT_MINUTES;
 
               // callback for status change
-              if(statusChangedCallback && currentStatus.timers != receivedTimers) {
+              if(statusChangedCallback != NULL && currentStatus.timers != receivedTimers) {
                 currentStatus.timers = receivedTimers;
                 statusChangedCallback(currentStatus);
               } else {
@@ -670,11 +729,12 @@ int HeatPump::readPacket() {
 
             case 0x06: { // status
               heatpumpStatus receivedStatus;
+              init_heatpumpStatus(&receivedStatus);
               receivedStatus.operating = data[4];
               receivedStatus.compressorFrequency = data[3];
 
               // callback for status change -- not triggered for compressor frequency at the moment
-              if(statusChangedCallback && currentStatus.operating != receivedStatus.operating) {
+              if(statusChangedCallback != NULL && currentStatus.operating != receivedStatus.operating) {
                 currentStatus.operating = receivedStatus.operating;
                 currentStatus.compressorFrequency = receivedStatus.compressorFrequency;
                 statusChangedCallback(currentStatus);
